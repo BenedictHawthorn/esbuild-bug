@@ -1,23 +1,5 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __markAsModule = (target) => __defProp(target, "__esModule", { value: true });
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[Object.keys(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-};
-var __reExport = (target, module2, desc) => {
-  if (module2 && typeof module2 === "object" || typeof module2 === "function") {
-    for (let key of __getOwnPropNames(module2))
-      if (!__hasOwnProp.call(target, key) && key !== "default")
-        __defProp(target, key, { get: () => module2[key], enumerable: !(desc = __getOwnPropDesc(module2, key)) || desc.enumerable });
-  }
-  return target;
-};
-var __toModule = (module2) => {
-  return __reExport(__markAsModule(__defProp(module2 != null ? __create(__getProtoOf(module2)) : {}, "default", module2 && module2.__esModule && "default" in module2 ? { get: () => module2.default, enumerable: true } : { value: module2, enumerable: true })), module2);
 };
 
 // node_modules/underscore/underscore-node-f.cjs
@@ -2565,7 +2547,7 @@ var require_follow_redirects = __commonJS({
         this._redirectable.emit(event, arg1, arg2, arg3);
       };
     });
-    var RedirectionError = createErrorType("ERR_FR_REDIRECTION_FAILURE", "");
+    var RedirectionError = createErrorType("ERR_FR_REDIRECTION_FAILURE", "Redirected request failed");
     var TooManyRedirectsError = createErrorType("ERR_FR_TOO_MANY_REDIRECTS", "Maximum number of redirects exceeded");
     var MaxBodyLengthExceededError = createErrorType("ERR_FR_MAX_BODY_LENGTH_EXCEEDED", "Request body larger than maxBodyLength limit");
     var WriteAfterEndError = createErrorType("ERR_STREAM_WRITE_AFTER_END", "write after end");
@@ -2670,6 +2652,9 @@ var require_follow_redirects = __commonJS({
           clearTimeout(self2._timeout);
           self2._timeout = null;
         }
+        self2.removeListener("abort", clearTimer);
+        self2.removeListener("error", clearTimer);
+        self2.removeListener("response", clearTimer);
         if (callback) {
           self2.removeListener("timeout", callback);
         }
@@ -2686,8 +2671,9 @@ var require_follow_redirects = __commonJS({
         this._currentRequest.once("socket", startTimer);
       }
       this.on("socket", destroyOnTimeout);
-      this.once("response", clearTimer);
-      this.once("error", clearTimer);
+      this.on("abort", clearTimer);
+      this.on("error", clearTimer);
+      this.on("response", clearTimer);
       return this;
     };
     [
@@ -2786,13 +2772,22 @@ var require_follow_redirects = __commonJS({
           this._requestBodyBuffers = [];
           removeMatchingHeaders(/^content-/i, this._options.headers);
         }
-        var previousHostName = removeMatchingHeaders(/^host$/i, this._options.headers) || url.parse(this._currentUrl).hostname;
-        var redirectUrl = url.resolve(this._currentUrl, location);
+        var currentHostHeader = removeMatchingHeaders(/^host$/i, this._options.headers);
+        var currentUrlParts = url.parse(this._currentUrl);
+        var currentHost = currentHostHeader || currentUrlParts.host;
+        var currentUrl = /^\w+:/.test(location) ? this._currentUrl : url.format(Object.assign(currentUrlParts, { host: currentHost }));
+        var redirectUrl;
+        try {
+          redirectUrl = url.resolve(currentUrl, location);
+        } catch (cause) {
+          this.emit("error", new RedirectionError(cause));
+          return;
+        }
         debug("redirecting to", redirectUrl);
         this._isRedirect = true;
         var redirectUrlParts = url.parse(redirectUrl);
         Object.assign(this._options, redirectUrlParts);
-        if (redirectUrlParts.hostname !== previousHostName) {
+        if (!(redirectUrlParts.host === currentHost || isSubdomainOf(redirectUrlParts.host, currentHost))) {
           removeMatchingHeaders(/^authorization$/i, this._options.headers);
         }
         if (typeof this._options.beforeRedirect === "function") {
@@ -2808,9 +2803,7 @@ var require_follow_redirects = __commonJS({
         try {
           this._performRequest();
         } catch (cause) {
-          var error2 = new RedirectionError("Redirected request failed: " + cause.message);
-          error2.cause = cause;
-          this.emit("error", error2);
+          this.emit("error", new RedirectionError(cause));
         }
       } else {
         response.responseUrl = this._currentUrl;
@@ -2890,16 +2883,21 @@ var require_follow_redirects = __commonJS({
       var lastValue;
       for (var header in headers) {
         if (regex.test(header)) {
-          lastValue = headers[header];
+          lastValue = headers[header].toString().trim();
           delete headers[header];
         }
       }
       return lastValue;
     }
     function createErrorType(code, defaultMessage) {
-      function CustomError(message) {
+      function CustomError(cause) {
         Error.captureStackTrace(this, this.constructor);
-        this.message = message || defaultMessage;
+        if (!cause) {
+          this.message = defaultMessage;
+        } else {
+          this.message = defaultMessage + ": " + cause.message;
+          this.cause = cause;
+        }
       }
       CustomError.prototype = new Error();
       CustomError.prototype.constructor = CustomError;
@@ -2913,6 +2911,10 @@ var require_follow_redirects = __commonJS({
       }
       request.on("error", noop);
       request.abort();
+    }
+    function isSubdomainOf(subdomain, domain) {
+      const dot = subdomain.length - domain.length - 1;
+      return dot > 0 && subdomain[dot] === "." && subdomain.endsWith(domain);
     }
     module2.exports = wrap({ http, https });
     module2.exports.wrap = wrap;
@@ -15850,6 +15852,6 @@ var require_authentication_context = __commonJS({
 });
 
 // index.js
-var import_authentication_context = __toModule(require_authentication_context());
-console.log(new import_authentication_context.default.AuthenticationContext());
+var ac = require_authentication_context();
+console.log(new ac.AuthenticationContext());
 /*! safe-buffer. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
